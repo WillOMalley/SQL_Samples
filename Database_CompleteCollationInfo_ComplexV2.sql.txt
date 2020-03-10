@@ -1,0 +1,241 @@
+
+/*************************************************************************************************************************************
+ Created by: Will O'Malley
+    Purpose: Generate an Indicator that designates (a) COLLATION sequence as
+		   Case Sensitive, Accent Sensitive or Binary.
+
+ Developer Info:
+    Collation Options:
+    URL: https://docs.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support?view=sql-server-ver15
+    SWITCHES:
+	    _CS/_CI :	Case					    - Distinguishes between uppercase and lowercase letters
+	    _AS/_AI :	Accent				    - Distinguishes between accented and unaccented characters
+	    _KS	   :	Kana-sensitive			    - Japanese kana characters
+	    _WS	   :	Width				    - Distinguishes between full-width and half-width characters
+	    _VSS	   :	Variation-selector-sensitive - Distinguishes between various ideographic variation selectors in the Japanese collations
+	    _BIN	   :	Binary				    - Sorts and compares data based on the bit patterns defined for each character.
+	    _BIN2   :	Binary				    - Sorts and compares data based on Unicode code points for Unicode data
+	    _UTF8   :	UTF-8				    - Enables UTF-8 encoded data to be stored in SQL Server.
+
+    T-SQL Regex LIKE expression:
+    References:
+	   URL: https://www.sqlshack.com/t-sql-regex-commands-in-sql-server/
+	   URL: https://docs.microsoft.com/en-us/sql/t-sql/language-elements/like-transact-sql?view=sql-server-ver15#pattern-matching-with-the-escape-clause
+	   URL: https://docs.microsoft.com/en-us/sql/t-sql/language-elements/logical-operators-transact-sql?view=sql-server-ver15
+
+    Some of the Wildcard characters used in Pattren Expressions are:
+	   %   : Any string of zero or more characters.
+	   _   : Any single character.
+    More Info:
+    https://docs.microsoft.com/en-us/sql/t-sql/language-elements/like-transact-sql?view=sql-server-ver15#arguments
+
+    In order to search for strings that contain the % or _ characters you need to ESCAPE that character.
+    More Info: 
+    https://docs.microsoft.com/en-us/sql/t-sql/language-elements/like-transact-sql?view=sql-server-ver15#pattern-matching-with-the-escape-clause
+
+*************************************************************************************************************************************/
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+SET NOCOUNT ON;
+
+IF (OBJECT_ID('tempdb..#ResultTable') IS NOT NULL)
+BEGIN
+    DROP TABLE #ResultTable;
+END
+
+
+
+CREATE TABLE #ResultTable
+(
+     ServerName				 VARCHAR(200)	 NOT NULL
+    ,InstanceName				 AS CONVERT(VARCHAR(200), ISNULL(SERVERPROPERTY('InstanceName'),''))
+    ,CurrentUserName			 AS CONVERT(VARCHAR(200), LTRIM(RTRIM(SUSER_NAME())))
+    ,SQLServerEdition			 AS CONVERT(VARCHAR(200), SERVERPROPERTY('Edition'))
+    ,SQLServerProductVersionString  AS CONVERT(VARCHAR(500), (CASE 
+												 	   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '8%'	  THEN 'SQL Server 2000'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '9%'	  THEN 'SQL Server 2005'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '10.0%' THEN 'SQL Server 2008'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '10.5%' THEN 'SQL Server 2008 R2'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '11%'	  THEN 'SQL Server 2012'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '12%'	  THEN 'SQL Server 2014'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '13%'	  THEN 'SQL Server 2016'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '14%'	  THEN 'SQL Server 2017'
+													   WHEN CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) LIKE '15%'	  THEN 'SQL Server 2019'
+												    ELSE 'Unknown Version (' + CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion')) + ')'
+												 END) + ' ' + CONVERT(VARCHAR(200), ISNULL(SERVERPROPERTY('ProductLevel'),''))
+								      )
+    ,SQLServerProductVersion		 AS CONVERT(VARCHAR(200), SERVERPROPERTY('ProductVersion'))
+    ,SQLServerCollation			 AS CONVERT(VARCHAR(200), SERVERPROPERTY('Collation'))
+    ,DatabaseId				 INT			 NOT NULL
+    ,DatabaseName				 VARCHAR(500)	 NOT NULL
+    ,DatabaseCollation			 VARCHAR(100)	 NOT NULL
+    ,DatabaseStatus				 VARCHAR(50)	 NOT NULL
+    ,DatabaseCollationDescription	 VARCHAR(2000)	 NOT NULL
+    ,DatabaseCollationXML		 XML			 NOT NULL DEFAULT ''
+);
+
+WITH DatabaseDetailsCTE
+AS
+(
+    SELECT
+	    CONVERT(VARCHAR(50), @@SERVERNAME)		  AS ServerName
+	   ,SD.[database_id]					  AS DatabaseId
+	   ,CONVERT(VARCHAR(200),SD.[name])		  AS DatabaseName
+	   ,CONVERT(VARCHAR(200),SD.[collation_name])  AS DatabaseCollation
+	   ,CONVERT(VARCHAR(200),SD.[state_desc])      AS DatabaseStatus
+	   ,DBCOL.COLLATION_DESCRIPTION			  AS DatabaseCollationDescription
+	   ,CONVERT(XML,'<ROOT>' + LTRIM(RTRIM(DBCOL.COLLATION_STRING_DATA)) + '</ROOT>') AS COLLATION_XML_DATA
+    FROM sys.databases AS SD
+    INNER JOIN
+    (
+	   SELECT
+		CONVERT(VARCHAR(200),[name])		   AS COLLATION_NAME
+	    ,CONVERT(VARCHAR(2000),[description])  AS COLLATION_DESCRIPTION
+	    ,CONVERT(VARCHAR(MAX), ('<COLLATION>'
+						   + CASE
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[C][S]%' ESCAPE '!' 
+								    THEN '<CASE SWITCH="_CS">Distinguishes between uppercase and lowercase letters.</CASE>'
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[C][I]%' ESCAPE '!'
+								    THEN '<CASE SWITCH="_CI">Does NOT Distinguishes between uppercase and lowercase letters.</CASE>'
+								ELSE '<CASE SWITCH="NA">Not Specified.</CASE>'
+							END
+						   + CASE
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[A][S]%' ESCAPE '!'
+								    THEN '<ACCENT SWITCH="_AS">Distinguishes between accented and unaccented characters.</ACCENT>'
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[A][I]%' ESCAPE '!'
+								    THEN '<ACCENT SWITCH="_AI">Does NOT Distinguishes between accented and unaccented characters.</ACCENT>'
+								ELSE '<ACCENT SWITCH="NA">Not Specified.</ACCENT>'
+							END 
+						   + CASE
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[K][S]%' ESCAPE '!'
+								    THEN '<KANA SWITCH="_KS">Japanese kana characters.</KANA>'
+								ELSE '<KANA SWITCH="NA">Not Specified.</KANA>'
+							END  
+						   + CASE
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[W][S]%' ESCAPE '!'
+								    THEN '<WIDTH SWITCH="_WS">Distinguishes between full-width and half-width characters.</WIDTH>'
+								ELSE '<WIDTH SWITCH="NA">Not Specified.</WIDTH>'
+							END 
+						   + CASE
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[V][S][S]%' ESCAPE '!'
+								    THEN '<VSS SWITCH="_VSS">Variation-selector-sensitive: Distinguishes between various ideographic variation selectors in the Japanese collations.</VSS>'
+								ELSE '<VSS SWITCH="NA">Not Specified.</VSS>'
+							END 
+						   + CASE 
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[B][I][N][^2]%' ESCAPE '!'
+								    THEN '<BIN SWITCH="_BIN">Sorts and compares data based on the bit patterns defined for each character.</BIN>'
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[B][I][N][2]%' ESCAPE '!'
+								    THEN '<BIN SWITCH="_BIN2">Sorts and compares data based on Unicode code points for Unicode data.</BIN>'
+								ELSE '<BIN SWITCH="NA">Not Specified</BIN>'
+							END 
+						   + CASE 
+								    WHEN CONVERT(VARCHAR(200),[name]) LIKE '%!_[U][T][F][8]%' ESCAPE '!'
+								    THEN '<UTF8 SWITCH="_UTF8">Enables UTF-8 encoded data to be stored in SQL Server.</UTF8>'
+								ELSE '<UTF8 SWITCH="NA">Not Specified.</UTF8>'
+							END
+						 )
+						 + '</COLLATION>'
+			  )	AS COLLATION_STRING_DATA
+	   FROM sys.fn_helpcollations()
+    ) AS DBCOL
+     ON CONVERT(VARCHAR(200),DBCOL.COLLATION_NAME) = CONVERT(VARCHAR(200),SD.collation_name)
+
+    WHERE SD.[name] NOT IN ('master','tempdb','model','msdb','ReportServer','ReportServerTempDB')
+)
+INSERT INTO #ResultTable
+    (
+	    ServerName
+	   ,DatabaseId
+	   ,DatabaseName
+	   ,DatabaseCollation
+	   ,DatabaseStatus
+	   ,DatabaseCollationDescription
+	   ,DatabaseCollationXML
+    )
+SELECT
+	    CTE.ServerName
+	   ,CTE.DatabaseId
+	   ,CTE.DatabaseName
+	   ,CTE.DatabaseCollation
+	   ,CTE.DatabaseStatus
+	   ,CTE.DatabaseCollationDescription
+	   ,CTE.COLLATION_XML_DATA
+FROM DatabaseDetailsCTE AS CTE;
+
+SELECT
+     RT.ServerName
+    ,RT.SQLServerEdition
+    ,RT.SQLServerProductVersionString
+    ,RT.SQLServerProductVersion
+    ,RT.SQLServerCollation
+    ,RT.InstanceName
+    ,RT.CurrentUserName
+    ,RT.DatabaseId
+    ,RT.DatabaseName
+    ,RT.DatabaseStatus
+    ,RT.DatabaseCollation
+    ,RT.DatabaseCollationDescription
+    ,COLLATION_INFO.CASE_COLLATION_SWITCH
+    ,COLLATION_INFO.CASE_COLLATION_DESC
+    ,COLLATION_INFO.IsCaseSensitive
+    ,COLLATION_INFO.ACCENT_COLLATION_SWITCH
+    ,COLLATION_INFO.ACCENT_COLLATION_DESC
+    ,COLLATION_INFO.IsAccentSensitive
+    ,COLLATION_INFO.KANA_COLLATION_SWITCH
+    ,COLLATION_INFO.KANA_COLLATION_DESC
+    ,COLLATION_INFO.WIDTH_COLLATION_SWITCH
+    ,COLLATION_INFO.WIDTH_COLLATION_DESC
+    ,COLLATION_INFO.VSS_COLLATION_SWITCH
+    ,COLLATION_INFO.VSS_COLLATION_DESC
+    ,COLLATION_INFO.BIN_COLLATION_SWITCH
+    ,COLLATION_INFO.BIN_COLLATION_DESC
+    ,COLLATION_INFO.IsBinaryCollation
+    ,COLLATION_INFO.UTF8_COLLATION_SWITCH
+    ,COLLATION_INFO.UTF8_COLLATION_DESC
+FROM #ResultTable AS RT
+INNER JOIN
+(
+    SELECT
+	    r.DatabaseId			 AS DatabaseId 
+	   ,r.CASE_COLLATION_SWITCH	 AS CASE_COLLATION_SWITCH
+	   ,r.CASE_COLLATION_DESC	 AS CASE_COLLATION_DESC
+	   ,CONVERT(BIT,CASE CASE_COLLATION_SWITCH WHEN '_CS' THEN 1 ELSE 0 END)   AS IsCaseSensitive
+	   ,r.ACCENT_COLLATION_SWITCH	 AS ACCENT_COLLATION_SWITCH
+	   ,r.ACCENT_COLLATION_DESC	 AS ACCENT_COLLATION_DESC
+	   ,CONVERT(BIT,CASE ACCENT_COLLATION_SWITCH WHEN '_AS' THEN 1 ELSE 0 END) AS IsAccentSensitive
+	   ,r.KANA_COLLATION_SWITCH	 AS KANA_COLLATION_SWITCH
+	   ,r.KANA_COLLATION_DESC	 AS KANA_COLLATION_DESC
+	   ,r.WIDTH_COLLATION_SWITCH	 AS WIDTH_COLLATION_SWITCH
+	   ,r.WIDTH_COLLATION_DESC	 AS WIDTH_COLLATION_DESC
+	   ,r.VSS_COLLATION_SWITCH	 AS VSS_COLLATION_SWITCH
+	   ,r.VSS_COLLATION_DESC		 AS VSS_COLLATION_DESC
+	   ,r.BIN_COLLATION_SWITCH	 AS BIN_COLLATION_SWITCH
+	   ,r.BIN_COLLATION_DESC		 AS BIN_COLLATION_DESC
+	   ,CONVERT(BIT,CASE BIN_COLLATION_SWITCH WHEN 'NA' THEN 0 ELSE 1 END)   AS IsBinaryCollation
+	   ,r.UTF8_COLLATION_SWITCH	 AS UTF8_COLLATION_SWITCH
+	   ,r.UTF8_COLLATION_DESC	 AS UTF8_COLLATION_DESC
+    FROM
+    (
+	   SELECT
+		   RRT.DatabaseId
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/CASE/@SWITCH)[1]','VARCHAR(5)'), '')   AS CASE_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/CASE)[1]','VARCHAR(100)'), '')	    AS CASE_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/ACCENT/@SWITCH)[1]','VARCHAR(5)'), '') AS ACCENT_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/ACCENT)[1]','VARCHAR(100)'), '')	    AS ACCENT_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/KANA/@SWITCH)[1]','VARCHAR(5)'), '')   AS KANA_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/KANA)[1]','VARCHAR(100)'), '')	    AS KANA_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/WIDTH/@SWITCH)[1]','VARCHAR(5)'), '')  AS WIDTH_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/WIDTH)[1]','VARCHAR(100)'), '')	    AS WIDTH_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/VSS/@SWITCH)[1]','VARCHAR(5)'), '')    AS VSS_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/VSS)[1]','VARCHAR(100)'), '')		    AS VSS_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/BIN/@SWITCH)[1]','VARCHAR(5)'), '')    AS BIN_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/BIN)[1]','VARCHAR(100)'), '')		    AS BIN_COLLATION_DESC
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/UTF8/@SWITCH)[1]','VARCHAR(5)'), '')   AS UTF8_COLLATION_SWITCH
+		  ,ISNULL(DatabaseCollationXML.value('(/ROOT/COLLATION/UTF8)[1]','VARCHAR(100)'), '')	    AS UTF8_COLLATION_DESC
+	   FROM #ResultTable AS RRT
+    ) AS r
+
+) AS COLLATION_INFO
+ON COLLATION_INFO.DatabaseId = RT.DatabaseId
+
+ORDER BY RT.DatabaseName ASC
+

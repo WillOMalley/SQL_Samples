@@ -1,0 +1,28 @@
+/*****************************************************************
+Created by William O'Malley
+
+Optimization:
+https://docs.microsoft.com/en-us/sql/t-sql/queries/hints-transact-sql-query?view=sql-server-ver15
+
+Parameter sniffing example:
+https://docs.microsoft.com/en-us/sql/t-sql/queries/hints-transact-sql-query?view=sql-server-ver15#arguments
+
+*****************************************************************/
+DECLARE @DatabaseName   VARCHAR(50)
+
+SET @DatabaseName = 'master';
+
+SELECT
+     @@SERVERNAME             AS ServerName
+    ,SD.database_id		     AS DatabaseId
+    ,LTRIM(RTRIM(SD.[name]))  AS DatabaseName
+    ,SD.collation_name	     AS DatabaseCollation
+    ,SD.state_desc            AS DatabaseStatus
+FROM sys.databases AS SD
+WHERE SD.[name] = @DatabaseName
+
+OPTION( OPTIMIZE FOR(@DatabaseName UNKNOWN ) );
+/*
+    Reference:
+    https://docs.microsoft.com/en-us/sql/t-sql/queries/hints-transact-sql-query?view=sql-server-ver15#b-using-optimize-for
+*/
